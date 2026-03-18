@@ -1,28 +1,318 @@
-<!-- Copyright Epic Games, Inc. All Rights Reserved. -->
 <!DOCTYPE HTML>
-<html style="width: 100%; height: 100%">
+<html style="width:100%;height:100%">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 
-    <!-- Optional: apply a font -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-	<link href="https://fonts.googleapis.com/css2?family=Michroma&family=Montserrat:wght@600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Michroma&family=Montserrat:wght@600&display=swap" rel="stylesheet">
 
-    <!-- Optional: set some favicons -->
-    <link rel="shortcut icon" href="./assets/images/favicon.ico" type="image/x-icon">
-	<link rel="icon" type="image/png" sizes="96x96" href="./assets/images/favicon-96x96.png">
-	<link rel="icon" type="image/png" sizes="32x32" href="./assets/images/favicon-32x32.png">
-	<link rel="icon" type="image/png" sizes="16x16" href="./assets/images/favicon-16x16.png">
+<link rel="shortcut icon" href="./assets/images/favicon.ico" type="image/x-icon">
+<link rel="icon" type="image/png" sizes="96x96" href="./assets/images/favicon-96x96.png">
+<link rel="icon" type="image/png" sizes="32x32" href="./assets/images/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="./assets/images/favicon-16x16.png">
 
-    <!-- Optional: set a title for your page -->
-    <title>Pixel Streaming</title>
+<title>Pixel Streaming</title>
+
+<script>
+
+window.addEventListener("load", function(){
+
+function waitForPS(){
+    if(window.pixelStreaming){
+        initUI();
+    } else {
+        setTimeout(waitForPS,200);
+    }
+}
+
+waitForPS();
+
+function initUI(){
+
+function createPanel(positionStyles,title){
+
+    const panel=document.createElement("div");
+
+    Object.assign(panel.style,{
+        position:"fixed",
+        zIndex:"9999",
+        background:"rgba(0,0,0,0.8)",
+        padding:"0",
+        borderRadius:"10px",
+        color:"white",
+        fontSize:"13px",
+        minWidth:"260px",
+        overflow:"hidden",
+        transition:"all 0.3s ease"
+    });
+
+    Object.assign(panel.style,positionStyles);
+
+    const header=document.createElement("div");
+    header.innerHTML=title+' <span style="float:right">▼</span>';
+
+    Object.assign(header.style,{
+        padding:"12px",
+        cursor:"pointer",
+        fontWeight:"bold",
+        background:"rgba(255,255,255,0.05)"
+    });
+
+    const content=document.createElement("div");
+
+    Object.assign(content.style,{
+        maxHeight:"0px",
+        overflow:"hidden",
+        transition:"max-height 0.35s ease",
+        padding:"0 12px"
+    });
+
+    let open=false;
+
+    header.onclick=function(){
+
+        open=!open;
+
+        header.querySelector("span").innerText=open?"▲":"▼";
+
+        content.style.maxHeight=open?content.scrollHeight+"px":"0px";
+        content.style.padding=open?"12px":"0 12px";
+    };
+
+    panel.appendChild(header);
+    panel.appendChild(content);
+
+    document.body.appendChild(panel);
+
+    return content;
+}
+
+const voiceContent=createPanel({top:"20px",right:"20px"},"Voice Configuration");
+
+function makeRow(label){
+
+    const row=document.createElement("div");
+    row.style.display="flex";
+    row.style.alignItems="center";
+    row.style.gap="8px";
+    row.style.marginBottom="8px";
+
+    const l=document.createElement("span");
+    l.innerText=label;
+    l.style.minWidth="85px";
+
+    const input=document.createElement("input");
+
+    Object.assign(input.style,{
+        flex:"1",
+        height:"26px",
+        fontSize:"12px",
+        padding:"4px 6px",
+        borderRadius:"4px",
+        border:"none"
+    });
+
+    row.appendChild(l);
+    row.appendChild(input);
+
+    voiceContent.appendChild(row);
+
+    return input;
+}
+
+const voiceInput=makeRow("Voice ID:");
+const ttsInput=makeRow("TTS:");
+
+ttsInput.value="cartesia";
+
+const bgContent=createPanel({top:"20px",left:"20px"},"Background Settings");
+
+function makeSection(label){
+
+    const s=document.createElement("div");
+    s.innerText=label;
+    s.style.fontWeight="bold";
+    s.style.margin="8px 0 4px 0";
+
+    bgContent.appendChild(s);
+}
+
+makeSection("Original");
+
+const originalBtn=document.createElement("button");
+originalBtn.innerText="Reset to Default";
+
+Object.assign(originalBtn.style,{
+    width:"100%",
+    height:"32px",
+    cursor:"pointer",
+    border:"none",
+    borderRadius:"6px",
+    marginBottom:"8px"
+});
+
+bgContent.appendChild(originalBtn);
+
+makeSection("Color");
+
+const colorInput=document.createElement("input");
+colorInput.type="color";
+
+Object.assign(colorInput.style,{
+    width:"100%",
+    height:"32px",
+    cursor:"pointer",
+    border:"none",
+    borderRadius:"6px",
+    marginBottom:"8px"
+});
+
+bgContent.appendChild(colorInput);
+
+makeSection("Image URL");
+
+const imageInput=document.createElement("input");
+
+Object.assign(imageInput.style,{
+    width:"100%",
+    height:"28px",
+    fontSize:"12px",
+    padding:"4px 6px",
+    borderRadius:"4px",
+    border:"none",
+    marginBottom:"6px"
+});
+
+bgContent.appendChild(imageInput);
+
+const imageBtn=document.createElement("button");
+imageBtn.innerText="Apply Image";
+
+Object.assign(imageBtn.style,{
+    width:"100%",
+    height:"32px",
+    cursor:"pointer",
+    border:"none",
+    borderRadius:"6px"
+});
+
+bgContent.appendChild(imageBtn);
+
+const main=document.createElement("div");
+
+Object.assign(main.style,{
+    position:"fixed",
+    bottom:"20px",
+    left:"50%",
+    transform:"translateX(-50%)",
+    zIndex:"9999",
+    background:"rgba(0,0,0,0.8)",
+    padding:"14px",
+    borderRadius:"10px",
+    display:"flex",
+    alignItems:"center",
+    gap:"10px"
+});
+
+const textInput=document.createElement("input");
+
+Object.assign(textInput.style,{
+    width:"420px",
+    height:"40px",
+    fontSize:"16px",
+    padding:"8px 10px",
+    border:"none",
+    borderRadius:"6px",
+    outline:"none"
+});
+
+textInput.placeholder="Type text for MetaHuman...";
+
+const sendBtn=document.createElement("button");
+sendBtn.innerText="Send";
+
+Object.assign(sendBtn.style,{
+    height:"40px",
+    padding:"0 20px",
+    fontSize:"15px",
+    border:"none",
+    borderRadius:"6px",
+    cursor:"pointer",
+    background:"#4CAF50",
+    color:"white"
+});
+
+main.appendChild(textInput);
+main.appendChild(sendBtn);
+
+document.body.appendChild(main);
+
+originalBtn.onclick=function(){
+
+    window.pixelStreaming.emitUIInteraction({
+        type:"set_background",
+        mode:"original"
+    });
+};
+
+colorInput.oninput=function(){
+
+    window.pixelStreaming.emitUIInteraction({
+        type:"set_background",
+        mode:"color",
+        hex:colorInput.value
+    });
+};
+
+imageBtn.onclick=function(){
+
+    const url=imageInput.value.trim();
+    if(!url) return;
+
+    window.pixelStreaming.emitUIInteraction({
+        type:"set_background",
+        mode:"image",
+        image_url:url
+    });
+};
+
+sendBtn.onclick=function(){
+
+    const x=textInput.value.trim();
+    if(!x) return;
+
+    const payload={
+        type:"start_talk",
+        text:x
+    };
+
+    if(voiceInput.value.trim().length>0)
+        payload.voice_id=voiceInput.value.trim();
+
+    if(ttsInput.value.trim().length>0)
+        payload.tts_provider=ttsInput.value.trim();
+
+    window.pixelStreaming.emitUIInteraction(payload);
+
+    textInput.value="";
+};
+
+textInput.addEventListener("keydown",function(e){
+    if(e.key==="Enter"){
+        sendBtn.click();
+    }
+});
+
+}
+
+});
+
+</script>
+
 </head>
 
-<!-- The Pixel Streaming player fills 100% of its parent element but body has a 0px height unless filled with content. As such, we explicitly force the body to be 100% of the viewport height -->
-<body style="width: 100vw; height: 100svh; min-height: -webkit-fill-available; overflow: hidden; overscroll-behavior: none; font-family: 'Montserrat'; margin: 0px">
-
-</body>
+<body style="width:100vw;height:100svh;min-height:-webkit-fill-available;overflow:hidden;overscroll-behavior:none;font-family:Montserrat;margin:0"></body>
 
 </html>
