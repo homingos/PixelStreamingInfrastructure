@@ -34,6 +34,15 @@ fi
 if [[ ! -z "$FRONTEND_DIR" ]]; then
     SERVER_ARGS+=" --http_root='$FRONTEND_DIR'"
 fi
+if [[ ! -z "$BASE_PATH" ]]; then
+    SERVER_ARGS+=" --base_path='$BASE_PATH'"
+fi
+if [[ "$REVERSE_PROXY" == "true" ]]; then
+    SERVER_ARGS+=" --reverse-proxy"
+    if [[ ! -z "$REVERSE_PROXY_NUM_PROXIES" ]]; then
+        SERVER_ARGS+=" --reverse-proxy-num-proxies=$REVERSE_PROXY_NUM_PROXIES"
+    fi
+fi
 
 build_wilbur
 print_config

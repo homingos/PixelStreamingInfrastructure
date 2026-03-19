@@ -197,7 +197,11 @@ export class Config {
                       // for readability, we omit the port if it's 80
                       (window.location.port === '80' || window.location.port === ''
                           ? ''
-                          : `:${window.location.port}`),
+                          : `:${window.location.port}`) +
+                      // Include the path from the current location to support base path routing
+                      (window.location.pathname && window.location.pathname !== '/'
+                          ? window.location.pathname.replace(/\/[^\/]*$/, '')
+                          : ''),
                 useUrlParams
             )
         );

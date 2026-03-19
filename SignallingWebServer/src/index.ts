@@ -167,6 +167,11 @@ program
             .default(config_file.reverse_proxy_num_proxies || 1)
     )
     .option(
+        '--base_path <path>',
+        'Sets the base path for the application when behind a reverse proxy (e.g., /flamai-pixelstreaminginfrastructure)',
+        config_file.base_path || ''
+    )
+    .option(
         '--log_config',
         'Will print the program configuration on startup.',
         config_file.log_config || false
@@ -232,6 +237,15 @@ if (options.log_config) {
 const app = express();
 if (options.reverse_proxy) {
     app.set('trust proxy', options.reverse_proxy_num_proxies);
+}
+
+// Handle base path configuration for reverse proxy with path-based routing
+if (options.base_path) {
+    const basePath = options.base_path.startsWith('/') ? options.base_path : `/${options.base_path}`;
+    Logger.info(`Configuring application with base path: ${basePath}`);
+    
+    // Make base path available to the application
+    app.locals.basePath = basePath;
 }
 
 const serverOpts: IServerConfig = {
