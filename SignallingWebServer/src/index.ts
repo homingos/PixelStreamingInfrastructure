@@ -156,7 +156,7 @@ program
     .option(
         '--reverse-proxy',
         'Enables reverse proxy mode. This will trust the X-Forwarded-For header.',
-        config_file.reverse_proxy || false
+        config_file.reverse_proxy !== undefined ? config_file.reverse_proxy : true
     )
     .addOption(
         new Option(
@@ -169,7 +169,7 @@ program
     .option(
         '--base_path <path>',
         'Sets the base path for the application when behind a reverse proxy (e.g., /flamai-pixelstreaminginfrastructure)',
-        config_file.base_path || ''
+        config_file.base_path !== undefined ? config_file.base_path : '/flamai-pixelstreaminginfrastructure'
     )
     .option(
         '--log_config',
