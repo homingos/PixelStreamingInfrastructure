@@ -32,4 +32,3 @@ EXPOSE 3479
 
 # Use port 8080 since non-root users cannot bind to port 80
 ENTRYPOINT ["bash", "SignallingWebServer/platform_scripts/bash/start.sh", "--nosudo", "--", "--player_port", "8080"]
-
