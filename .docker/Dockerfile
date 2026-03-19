@@ -33,3 +33,4 @@ EXPOSE 3479
 
 # Set the signalling server as the container's entrypoint
 ENTRYPOINT ["bash", "SignallingWebServer/platform_scripts/bash/start.sh", "--nosudo"]
+
