@@ -10,19 +10,14 @@ COPY /Common ./Common
 COPY /Signalling ./Signalling
 COPY /SignallingWebServer ./SignallingWebServer
 COPY /Frontend ./Frontend
-
-# Install coturn and build frontend at IMAGE BUILD TIME (while we're still root)
-RUN apt-get update && apt-get install -y coturn && apt-get clean
-
+# Install the dependencies for the signalling server and build the frontend
+RUN apt-get update && rm -rf /var/lib/apt/lists/*
 RUN SignallingWebServer/platform_scripts/bash/setup.sh --build
 
-# Pre-create the logs directory and make it writable by any user
-# This is needed because GKE runs containers as non-root
+# Create logs directory with write permissions for non-root users
 RUN mkdir -p /SignallingWebServer/logs && chmod 777 /SignallingWebServer/logs
 
-# Also ensure the working directory is writable
-RUN chmod -R 777 /SignallingWebServer
-
+# Expose TCP ports 80 and 443 for player WebSocket connections and web server HTTP(S) access
 EXPOSE 80
 EXPOSE 443
 EXPOSE 8888
@@ -33,3 +28,4 @@ EXPOSE 3478
 EXPOSE 3479
 
 ENTRYPOINT ["bash", "SignallingWebServer/platform_scripts/bash/start.sh", "--nosudo"]
+
