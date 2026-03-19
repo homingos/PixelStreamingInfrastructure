@@ -1,0 +1,568 @@
+steps:
+  # Detecting branch
+  - name: "alpine/git"
+    id: detect-branch
+    secretEnv: ["SSH_KEY"]
+    entrypoint: "ash"
+    args:
+      - -c
+      - |
+        mkdir -p /root/.ssh
+        echo "$$SSH_KEY" > /root/.ssh/id_rsa
+        chmod 400 /root/.ssh/id_rsa
+        ssh-keyscan github.com > /root/.ssh/known_hosts
+
+        git fetch origin
+        if [[ "$BRANCH_NAME" == hotfix* ]]; then
+          echo "HOTFIX_BRANCH=true" >> /workspace/branch_flags.txt
+        else
+          echo "HOTFIX_BRANCH=false" >> /workspace/branch_flags.txt
+        fi
+        echo "Current branch: $BRANCH_NAME"
+        cat /workspace/branch_flags.txt
+
+  - name: "alpine/git"
+    id: check-commit-msg-and-merge
+    secretEnv: ["SSH_KEY"]
+    entrypoint: "ash"
+    args:
+      - -c
+      - |
+        mkdir -p /root/.ssh
+        echo "$$SSH_KEY" > /root/.ssh/id_rsa
+        chmod 400 /root/.ssh/id_rsa
+        ssh-keyscan github.com > /root/.ssh/known_hosts
+
+        git fetch --unshallow origin production || git fetch origin production
+        git checkout production
+
+        COMMIT_MSG=$(git log -1 --pretty=%B)
+        echo "Last commit message: $$COMMIT_MSG"
+        if [ "$$COMMIT_MSG" = "This signifies a hotfix deployment" ]; then
+          echo "_HOTFIX_COMMIT=nonprod" >> /workspace/commit_flags.txt
+        elif [ "$$COMMIT_MSG" = "This signifies a prod hotfix deployment" ]; then
+          echo "_HOTFIX_COMMIT=prod" >> /workspace/commit_flags.txt
+        else
+          echo "_HOTFIX_COMMIT=false" >> /workspace/commit_flags.txt
+        fi
+        cat /workspace/commit_flags.txt
+
+  - name: "alpine/git"
+    secretEnv: ["SSH_KEY"]
+    entrypoint: "ash"
+    args:
+      - -c
+      - |
+        mkdir -p /root/.ssh
+        echo "$$SSH_KEY" >> /root/.ssh/id_rsa
+        echo "$$SSH_KEY" >> /workspace/id_rsa
+        chmod 400 /root/.ssh/id_rsa
+        ssh-keyscan github.com > /root/.ssh/known_hosts
+        git config --global --add url."git@github.com:".insteadOf "https://github.com/"
+        git remote set-url origin git@github.com:homingos/$REPO_NAME.git
+        git submodule update --init
+        git lfs install
+        git lfs pull
+
+  - name: "alpine/git"
+    id: check-diff
+    secretEnv: ["SSH_KEY"]
+    entrypoint: "ash"
+    args:
+      - -c
+      - |
+        mkdir -p /root/.ssh
+        echo "$$SSH_KEY" > /root/.ssh/id_rsa
+        chmod 400 /root/.ssh/id_rsa
+        ssh-keyscan github.com > /root/.ssh/known_hosts
+
+        git fetch --unshallow origin production || git fetch origin production
+        git checkout production
+        echo "Checking git diff inside the same repo..."
+        CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+        echo $$CHANGED_FILES
+
+        TOTAL_CHANGES=$(echo "$$CHANGED_FILES" | wc -l)
+        SKAFOLD_CONFIG_CHANGES=$(echo "$$CHANGED_FILES" | grep -c -e "^skaffold.yaml$" -e "^.gcp/build/config.yaml$")
+        HOTFIX_BRANCH=$(cat /workspace/branch_flags.txt | cut -d= -f2)
+
+        # Set _SKIP_BUILD flag
+        if [ -z "$$CHANGED_FILES" ] && [  "$$HOTFIX_BRANCH" = "false" ]; then
+          # Empty commit
+          echo "_SKIP_BUILD=true" >> /workspace/skip_build.txt
+        elif [ "$$TOTAL_CHANGES" -eq "$$SKAFOLD_CONFIG_CHANGES" ] && [  "$$HOTFIX_BRANCH" = "false" ]; then
+          # Only skaffold.yaml or config.yaml changed (no other files)
+          echo "_SKIP_BUILD=true" >> /workspace/skip_build.txt
+        else
+          # Other files changed (with or without skaffold/config changes)
+          echo "_SKIP_BUILD=false" >> /workspace/skip_build.txt
+        fi
+
+        echo "Changed files: \"$$CHANGED_FILES\""
+        echo "Hotfix branch: $$HOTFIX_BRANCH"
+        echo "Total changes: $$TOTAL_CHANGES"
+        echo "Skaffold/config changes: $$SKAFOLD_CONFIG_CHANGES"
+      
+  #Skip build if no changes
+  - name: "gcr.io/cloud-builders/docker"
+    entrypoint: "bash"
+    args:
+      - -c
+      - |
+        SKIP_BUILD=$(cat /workspace/skip_build.txt | cut -d= -f2)
+        if [ "$$SKIP_BUILD" = "true" ]; then
+          echo "Skipping image build due to skip-build flag"
+        elif [ "$$HOTFIX_COMMIT" = "nonprod" ] || [ "$$HOTFIX_COMMIT" = "prod" ]; then
+          echo "Skipping img build due to infra hotfix commit"
+        else
+          docker build -f .docker/Dockerfile -t asia-south1-docker.pkg.dev/$PROJECT_ID/homingos/$REPO_NAME:$COMMIT_SHA .
+        fi
+
+  - name: "gcr.io/cloud-builders/docker"
+    entrypoint: "bash"
+    args:
+      - -c
+      - |
+        SKIP_BUILD=$(cat /workspace/skip_build.txt | cut -d= -f2)
+        if [ "$$SKIP_BUILD" = "true" ] || [ "$$HOTFIX_COMMIT" = "prod" ] || [ "$$HOTFIX_COMMIT" = "nonprod" ]; then
+          echo "Skipping image push step"
+          exit 0
+        fi
+        docker push asia-south1-docker.pkg.dev/$PROJECT_ID/homingos/$REPO_NAME:$COMMIT_SHA
+
+  - name: "alpine/git"
+    secretEnv: ["SSH_KEY"]
+    entrypoint: "ash"
+    args:
+      - -c
+      - |
+        mkdir -p /root/.ssh
+        echo "$$SSH_KEY" > /root/.ssh/id_rsa
+        chmod 400 /root/.ssh/id_rsa
+        ssh-keyscan github.com > /root/.ssh/known_hosts
+        git clone git@github.com:homingos/service-helm-values.git /workspace/helm
+        cp -r /workspace/helm/$REPO_NAME/values /workspace/values
+        cd /workspace/values
+        ls
+  
+  # Sync secrets from berglas .env files to Kubernetes SecretObjects
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: sync-k8s-secrets
+    entrypoint: "bash"
+    args:
+      - -c
+      - |
+        echo "Syncing secrets from berglas .env files to Kubernetes SecretObjects..."
+        
+        # Install required tools
+        apt-get update && apt-get install -y curl wget jq
+        wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        chmod +x /usr/local/bin/yq
+        
+        # Download berglas using GitHub API to get correct asset URL
+        BERGLAS_ASSET_URL=$$(curl -s https://api.github.com/repos/GoogleCloudPlatform/berglas/releases/latest | jq -r '.assets[] | select(.name | test("linux.*amd64.*tar.gz")) | .browser_download_url' | head -1)
+        echo "Downloading berglas from: $$BERGLAS_ASSET_URL"
+        if [ -z "$$BERGLAS_ASSET_URL" ] || [ "$$BERGLAS_ASSET_URL" = "null" ]; then
+          echo "Error: Could not find berglas linux amd64 release asset"
+          exit 1
+        fi
+        curl -sL "$$BERGLAS_ASSET_URL" | tar -xz -C /usr/local/bin berglas
+        chmod +x /usr/local/bin/berglas
+        
+        # Verify berglas is working
+        if ! /usr/local/bin/berglas --version; then
+          echo "Error: Failed to install berglas correctly"
+          exit 1
+        fi
+        
+        # Determine environment
+        # If triggered by secret update, use _SECRET_ENV
+        # Otherwise, use commit flags
+        if [ "$_SECRET_UPDATED" = "true" ] && [ -n "$_SECRET_ENV" ]; then
+          ENV="$_SECRET_ENV"
+          echo "Environment from secret update trigger: $$ENV"
+        else
+          _HOTFIX_COMMIT=$(cat /workspace/commit_flags.txt 2>/dev/null | cut -d= -f2 || echo "")
+          HOTFIX_BRANCH=$(cat /workspace/branch_flags.txt 2>/dev/null | cut -d= -f2 || echo "")
+          
+          if [ "$$_HOTFIX_COMMIT" = "nonprod" ]; then
+            ENV="nonprod"
+          elif [ "$$_HOTFIX_COMMIT" = "prod" ] || [ "$$HOTFIX_BRANCH" = "true" ]; then
+            ENV="prod"
+          else
+            ENV="dev"
+          fi
+        fi
+        
+        echo "Environment determined: $$ENV"
+        
+        # Check if secrets config file exists
+        SECRETS_CONFIG=".gcp/secrets-config.yaml"
+        if [ ! -f "$$SECRETS_CONFIG" ]; then
+          echo "Warning: Secrets config file $$SECRETS_CONFIG not found. Skipping secret sync."
+          exit 0
+        fi
+        
+        # Get environment-specific configuration
+        TARGET_PROJECT_ID=$(yq ".environments.$$ENV.project_id" $$SECRETS_CONFIG)
+        NAMESPACE=$(yq ".environments.$$ENV.namespace" $$SECRETS_CONFIG)
+        
+        if [ -z "$$TARGET_PROJECT_ID" ] || [ "$$TARGET_PROJECT_ID" = "null" ]; then
+          echo "Error: No configuration found for environment: $$ENV"
+          exit 1
+        fi
+        
+        echo "Target project: $$TARGET_PROJECT_ID"
+        echo "Namespace: $$NAMESPACE"
+        
+        # Set GCP project context
+        gcloud config set project $$TARGET_PROJECT_ID
+        
+        # Get GKE cluster name and location from config file
+        CLUSTER_NAME=$(yq ".clusters.$$ENV.name" $$SECRETS_CONFIG)
+        CLUSTER_LOCATION=$(yq ".clusters.$$ENV.location" $$SECRETS_CONFIG)
+        
+        if [ -z "$$CLUSTER_NAME" ] || [ "$$CLUSTER_NAME" = "null" ]; then
+          echo "Warning: No cluster configuration found for environment: $$ENV. Skipping K8s secret creation."
+          exit 0
+        fi
+        
+        echo "Cluster: $$CLUSTER_NAME in $$CLUSTER_LOCATION"
+        
+        # Get GKE credentials
+        if ! gcloud container clusters get-credentials $$CLUSTER_NAME --location=$$CLUSTER_LOCATION --project=$$TARGET_PROJECT_ID; then
+          echo "Warning: Could not get GKE credentials. Skipping K8s secret creation."
+          exit 0
+        fi
+        
+        # Get berglas bucket from config
+        BERGLAS_BUCKET=$(yq ".berglas.bucket" $$SECRETS_CONFIG)
+        
+        # Process each secret configuration
+        SECRET_COUNT=$(yq ".environments.$$ENV.secrets | length" $$SECRETS_CONFIG)
+        
+        for i in $(seq 0 $$((SECRET_COUNT - 1))); do
+          SECRET_TYPE=$(yq ".environments.$$ENV.secrets[$$i].secret_type // \"Opaque\"" $$SECRETS_CONFIG)
+          
+          # Generate berglas secret name from repo name and environment
+          BERGLAS_SECRET="$$BERGLAS_BUCKET/$REPO_NAME-$$ENV-env"
+          
+          # Generate K8s secret name from repo name and environment
+          K8S_SECRET_NAME="$REPO_NAME-$$ENV-secrets"
+          
+          echo "Processing secret: $$K8S_SECRET_NAME from berglas: $$BERGLAS_SECRET"
+          
+          # Retrieve .env file from berglas
+          TEMP_ENV_FILE="/tmp/env-$$i.txt"
+          if ! berglas access "$$BERGLAS_SECRET" > $$TEMP_ENV_FILE; then
+            echo "Error: Failed to retrieve secret from berglas: $$BERGLAS_SECRET"
+            continue
+          fi
+          
+          # Parse .env file and create K8s secret
+          # Handle both formats: KEY=VALUE and export KEY='VALUE'
+          TEMP_K8S_SECRET="/tmp/k8s-secret-$$i.yaml"
+          
+          # Start building the K8s secret YAML
+          printf 'apiVersion: v1\n' > $$TEMP_K8S_SECRET
+          printf 'kind: Secret\n' >> $$TEMP_K8S_SECRET
+          printf 'metadata:\n' >> $$TEMP_K8S_SECRET
+          printf '  name: %s\n' "$$K8S_SECRET_NAME" >> $$TEMP_K8S_SECRET
+          printf '  namespace: %s\n' "$$NAMESPACE" >> $$TEMP_K8S_SECRET
+          printf 'type: %s\n' "$$SECRET_TYPE" >> $$TEMP_K8S_SECRET
+          printf 'data:\n' >> $$TEMP_K8S_SECRET
+          
+          # Parse .env file line by line
+          while IFS= read -r line || [ -n "$$line" ]; do
+            # Skip empty lines and comments
+            [[ -z "$$line" || "$$line" =~ ^[[:space:]]*# ]] && continue
+            
+            # Remove 'export ' prefix if present
+            line=$${line#export }
+            
+            # Extract key and value
+            if [[ "$$line" =~ ^([^=]+)=(.*)$ ]]; then
+              KEY="$${BASH_REMATCH[1]}"
+              VALUE="$${BASH_REMATCH[2]}"
+              
+              # Remove quotes from value (handles 'value', "value", 'value', "value")
+              VALUE=$${VALUE#\'}
+              VALUE=$${VALUE%\'}
+              VALUE=$${VALUE#\"}
+              VALUE=$${VALUE%\"}
+              
+              # Keep original key name for environment variables
+              K8S_KEY="$$KEY"
+              
+              # Base64 encode the value for K8s secret
+              ENCODED_VALUE=$$(echo -n "$$VALUE" | base64 -w 0)
+              
+              # Append to K8s secret YAML
+              echo "  $$K8S_KEY: $$ENCODED_VALUE" >> $$TEMP_K8S_SECRET
+            fi
+          done < $$TEMP_ENV_FILE
+          
+          # Apply the K8s secret (create or update)
+          if kubectl apply -f $$TEMP_K8S_SECRET; then
+            echo "✓ Successfully created/updated K8s secret: $$K8S_SECRET_NAME in namespace $$NAMESPACE"
+          else
+            echo "✗ Failed to create/update K8s secret: $$K8S_SECRET_NAME"
+            exit 1
+          fi
+          
+          # Clean up temporary files
+          rm -f $$TEMP_ENV_FILE $$TEMP_K8S_SECRET
+        done
+        
+        echo "Secret sync to Kubernetes completed for environment: $$ENV"
+  
+  # Rollout restart deployment if triggered by secret update
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: rollout-restart-on-secret-update
+    entrypoint: "bash"
+    args:
+      - -c
+      - |
+        # Check if this build was triggered by a secret update
+        if [ "$_SECRET_UPDATED" != "true" ]; then
+          echo "Not a secret-triggered build - skipping rollout restart"
+          exit 0
+        fi
+        
+        echo "Secret update detected - performing rollout restart..."
+        SECRET_ENV="$_SECRET_ENV"
+        [ -z "$$SECRET_ENV" ] && SECRET_ENV="dev"
+        
+        # Determine cluster based on environment
+        case $$SECRET_ENV in
+          dev)
+            CLUSTER_NAME="fi-development-wmb8"
+            CLUSTER_LOCATION="asia-south1"
+            PROJECT="prj-d-fi-base-3cyk"
+            ;;
+          nonprod)
+            CLUSTER_NAME="fi-nonproduction-0x8j"
+            CLUSTER_LOCATION="asia-south1-b"
+            PROJECT="prj-n-fi-base-zjtg"
+            ;;
+          prod)
+            CLUSTER_NAME="fi-production-9u4f"
+            CLUSTER_LOCATION="asia-south1"
+            PROJECT="prj-p-fi-base-50py"
+            ;;
+          *)
+            echo "Unknown environment: $$SECRET_ENV"
+            exit 1
+            ;;
+        esac
+        
+        echo "Connecting to cluster $$CLUSTER_NAME in $$PROJECT..."
+        gcloud container clusters get-credentials $$CLUSTER_NAME \
+          --location=$$CLUSTER_LOCATION \
+          --project=$$PROJECT
+        
+        NAMESPACE="instant"
+        DEPLOYMENT_NAME="backend-chart-$REPO_NAME"
+        
+        # Check if deployment exists
+        if kubectl get deployment $$DEPLOYMENT_NAME -n $$NAMESPACE 2>/dev/null; then
+          echo "Restarting deployment: $$DEPLOYMENT_NAME"
+          kubectl rollout restart deployment/$$DEPLOYMENT_NAME -n $$NAMESPACE
+          
+          echo "Waiting for rollout to complete..."
+          if kubectl rollout status deployment/$$DEPLOYMENT_NAME -n $$NAMESPACE --timeout=300s; then
+            echo "ROLLOUT_STATUS=success" >> /workspace/rollout_status.txt
+            echo "Rollout completed successfully"
+            
+            # Get pod status - try different label selectors
+            POD_INFO=$(kubectl get pods -n $$NAMESPACE -o wide --no-headers | grep "$$DEPLOYMENT_NAME" | head -3)
+            if [ -z "$$POD_INFO" ]; then
+              POD_INFO="Pods running (use kubectl get pods -n $$NAMESPACE | grep $$DEPLOYMENT_NAME)"
+            fi
+            echo "POD_INFO<<EOF" >> /workspace/rollout_status.txt
+            echo "$$POD_INFO" >> /workspace/rollout_status.txt
+            echo "EOF" >> /workspace/rollout_status.txt
+          else
+            echo "ROLLOUT_STATUS=failed" >> /workspace/rollout_status.txt
+            echo "Rollout failed or timed out"
+          fi
+        else
+          echo "Deployment $$DEPLOYMENT_NAME not found - this might be a new service"
+          echo "ROLLOUT_STATUS=new_service" >> /workspace/rollout_status.txt
+        fi
+  
+  # Send Slack notification after secret update + rollout
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: slack-notify-secret-update
+    entrypoint: "bash"
+    secretEnv: ["SLACK_WEBHOOK_URL"]
+    args:
+      - -c
+      - |
+        # Check if this build was triggered by a secret update
+        if [ "$_SECRET_UPDATED" != "true" ]; then
+          echo "Not a secret-triggered build - skipping Slack notification"
+          exit 0
+        fi
+        
+        echo "Sending Slack notification for secret update..."
+        
+        # Read rollout status
+        if [ -f /workspace/rollout_status.txt ]; then
+          ROLLOUT_STATUS=$(grep "ROLLOUT_STATUS=" /workspace/rollout_status.txt | cut -d= -f2)
+          POD_INFO=$(sed -n '/POD_INFO<<EOF/,/EOF/p' /workspace/rollout_status.txt | grep -v "POD_INFO\|EOF" || echo "N/A")
+        else
+          ROLLOUT_STATUS="unknown"
+          POD_INFO="N/A"
+        fi
+        
+        SECRET_NAME="$_SECRET_NAME"
+        SECRET_ACTOR="$_SECRET_ACTOR"
+        SECRET_ENV="$_SECRET_ENV"
+        [ -z "$$SECRET_NAME" ] && SECRET_NAME="unknown"
+        [ -z "$$SECRET_ACTOR" ] && SECRET_ACTOR="unknown"
+        [ -z "$$SECRET_ENV" ] && SECRET_ENV="unknown"
+        TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        
+        # Determine status color and emoji
+        if [ "$$ROLLOUT_STATUS" = "success" ]; then
+          COLOR="#36a64f"
+          STATUS_TEXT="Pods restarted successfully"
+          EMOJI="white_check_mark"
+        elif [ "$$ROLLOUT_STATUS" = "new_service" ]; then
+          COLOR="#ffc107"
+          STATUS_TEXT="New service - K8s secret created"
+          EMOJI="new"
+        else
+          COLOR="#dc3545"
+          STATUS_TEXT="Rollout failed"
+          EMOJI="x"
+        fi
+        
+        # Build Slack message
+        SLACK_PAYLOAD=$(cat <<EOF
+        {
+          "attachments": [
+            {
+              "color": "$$COLOR",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": ":$$EMOJI: Secret Update - $REPO_NAME",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*Secret:*\n\`$$SECRET_NAME\`"},
+                    {"type": "mrkdwn", "text": "*Environment:*\n$$SECRET_ENV"},
+                    {"type": "mrkdwn", "text": "*Changed by:*\n$$SECRET_ACTOR"},
+                    {"type": "mrkdwn", "text": "*Status:*\n$$STATUS_TEXT"}
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Pod Status:*\n\`\`\`$$POD_INFO\`\`\`"
+                  }
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    {"type": "mrkdwn", "text": "Timestamp: $$TIMESTAMP | Build: $BUILD_ID"}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        EOF
+        )
+        
+        curl -X POST -H "Content-Type: application/json" \
+          -d "$$SLACK_PAYLOAD" \
+          "$$SLACK_WEBHOOK_URL"
+        
+        echo "Slack notification sent"
+        
+        # Exit the build here if this was a secret-only update (no code changes)
+        echo "SECRET_BUILD_COMPLETE=true" >> /workspace/secret_build.txt
+  
+  #Get the latest image tag from artifact registry
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: get-latest-image-tag
+    entrypoint: "bash"
+    args:
+      - -c
+      - |
+        # Skip if this is a secret-only build
+        if [ "$_SECRET_UPDATED" = "true" ]; then
+          echo "Secret-only build - skipping image tag fetch"
+          exit 0
+        fi
+        
+        echo "Fetching the latest image tag from Artifact Registry..."
+        _LATEST_IMAGE_TAG=$(gcloud artifacts docker images list asia-south1-docker.pkg.dev/$PROJECT_ID/homingos/$REPO_NAME --sort-by=~CREATE_TIME --limit=1 --format="value(tags[0])" --include-tags)
+        echo $$_LATEST_IMAGE_TAG
+        echo "_LATEST_IMAGE_TAG=$$_LATEST_IMAGE_TAG" >> /workspace/latest_image_tag.txt
+        cat /workspace/latest_image_tag.txt
+      
+  #Use the latest image tag while creating cloud deploy release
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: create-release
+    entrypoint: "bash"
+    args:
+      - -c
+      - |
+        # Skip if this is a secret-only build
+        if [ "$_SECRET_UPDATED" = "true" ]; then
+          echo "Secret-only build - skipping Cloud Deploy release"
+          exit 0
+        fi
+        
+        echo "Creating Cloud Deploy release..."
+        _LATEST_IMAGE_TAG=$(cat /workspace/latest_image_tag.txt | cut -d= -f2)
+        echo "Latest image tag: $$_LATEST_IMAGE_TAG"
+        
+        # Determine which pipeline to use
+        _HOTFIX_COMMIT=$(cat /workspace/commit_flags.txt | cut -d= -f2)
+        HOTFIX_BRANCH=$(cat /workspace/branch_flags.txt | cut -d= -f2)
+        echo $$HOTFIX_BRANCH
+        if [ "$$_HOTFIX_COMMIT" = "nonprod" ]; then
+          _PIPELINE_NAME="fi-hotfix-pipeline"
+          echo "Hotfix commit detected. Using pipeline: $$_PIPELINE_NAME"
+        elif [  "$$_HOTFIX_COMMIT" = "prod" ] || [  "$$HOTFIX_BRANCH" = "true"  ]; then
+          _PIPELINE_NAME="fi-hotfix-direct-prod-pipeline"
+          echo "Using hotfix prod pipeline: $$_PIPELINE_NAME"
+        else
+          _PIPELINE_NAME="$_DEPLOYMENT_PIPELINE_NAME"
+          echo "Using default pipeline: $$_PIPELINE_NAME"
+        fi
+
+        gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
+        gcloud deploy releases create release-$SHORT_SHA \
+        --project=prj-c-cloudbuild-lk57 \
+        --region=asia-south1 \
+        --delivery-pipeline=$$_PIPELINE_NAME \
+        --annotations="triggered_by=cloudbuild" \
+        --images=imageurl=asia-south1-docker.pkg.dev/$PROJECT_ID/homingos/$REPO_NAME:$$_LATEST_IMAGE_TAG
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: "E2_HIGHCPU_32"
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/SSH_KEY/versions/latest
+      env: "SSH_KEY"
+    - versionName: projects/prj-c-secrets-kvc2/secrets/slack-webhook-url/versions/latest
+      env: "SLACK_WEBHOOK_URL"
+substitutions:
+  _SECRET_UPDATED: "false"
+  _SECRET_NAME: ""
+  _SECRET_ACTOR: ""
+  _SECRET_ENV: ""
+# Last updated by bootstrap workflow: 2026-03-19T10:28:25Z
