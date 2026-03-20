@@ -259,7 +259,8 @@ const serverOpts: IServerConfig = {
     playerPort: options.player_port,
     sfuPort: options.sfu_port,
     peerOptions: options.peer_options,
-    maxSubscribers: options.max_players
+    maxSubscribers: options.max_players,
+    playerBasePath: options.base_path
 };
 
 if (options.serve) {

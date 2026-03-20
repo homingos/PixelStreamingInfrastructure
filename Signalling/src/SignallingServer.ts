@@ -28,6 +28,9 @@ export interface IServerConfig {
     // Base path for streamer connections.
     streamerBasePath?: string;
 
+    // Base path for player connections.
+    playerBasePath?: string;
+
     // The port to listen on for streamer connections.
     streamerPort: number;
 
@@ -115,11 +118,19 @@ export class SignallingServer {
 
         // Player connections
         const server = config.httpsServer || config.httpServer;
-        const playerServer = new wslib.WebSocketServer({
+        const playerWsOptions: wslib.ServerOptions = {
             server: server,
             port: server ? undefined : config.playerPort,
             ...config.playerWsOptions
-        });
+        };
+        
+        // Add path restriction if playerBasePath is specified
+        if (config.playerBasePath) {
+            playerWsOptions.path = config.playerBasePath;
+            Logger.info(`Listening for player connections on base path ${config.playerBasePath}`);
+        }
+        
+        const playerServer = new wslib.WebSocketServer(playerWsOptions);
         playerServer.on('connection', this.onPlayerConnected.bind(this));
         if (!config.httpServer && !config.httpsServer) {
             Logger.info(`Listening for player connections on port ${config.playerPort}`);
