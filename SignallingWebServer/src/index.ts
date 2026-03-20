@@ -2,6 +2,7 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import http from 'http';
 import {
     SignallingServer,
     IServerConfig,
@@ -172,6 +173,11 @@ program
         config_file.base_path !== undefined ? config_file.base_path : '/flamai-pixelstreaminginfrastructure'
     )
     .option(
+        '--streamer_base_path <path>',
+        'Sets the base path for streamer connections (e.g., /flamai-pixelstreamingsvc)',
+        config_file.streamer_base_path !== undefined ? config_file.streamer_base_path : '/flamai-pixelstreamingsvc'
+    )
+    .option(
         '--log_config',
         'Will print the program configuration on startup.',
         config_file.log_config || false
@@ -281,6 +287,30 @@ if (options.serve) {
         serverOpts.httpServer = webServer.httpServer;
     }
     serverOpts.httpsServer = webServer.httpsServer;
+}
+
+// Create HTTP server for streamer port with base path support
+if (options.streamer_base_path) {
+    const streamerApp = express();
+    if (options.reverse_proxy) {
+        streamerApp.set('trust proxy', options.reverse_proxy_num_proxies);
+    }
+    
+    const streamerBasePath = options.streamer_base_path.startsWith('/') 
+        ? options.streamer_base_path 
+        : `/${options.streamer_base_path}`;
+    
+    Logger.info(`Configuring streamer with base path: ${streamerBasePath}`);
+    
+    // Create HTTP server for streamer
+    const streamerHttpServer = http.createServer(streamerApp);
+    streamerHttpServer.listen(options.streamer_port, () => {
+        Logger.info(`Streamer HTTP server listening on port ${options.streamer_port} with base path ${streamerBasePath}`);
+    });
+    
+    // Attach to server options
+    serverOpts.streamerHttpServer = streamerHttpServer;
+    serverOpts.streamerBasePath = streamerBasePath;
 }
 
 const signallingServer = new SignallingServer(serverOpts);

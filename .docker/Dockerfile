@@ -35,4 +35,4 @@ RUN printf '#!/bin/sh\ncurl -sf http://localhost:8080/ > /dev/null || exit 1\n' 
 
 # Use port 8080 since non-root users cannot bind to port 80
 WORKDIR /SignallingWebServer
-ENTRYPOINT ["bash", "SignallingWebServer/platform_scripts/bash/start.sh", "--nosudo", "--", "--player_port", "8080", "--base_path", "/flamai-pixelstreaminginfrastructure"]
+ENTRYPOINT ["bash", "SignallingWebServer/platform_scripts/bash/start.sh", "--nosudo", "--", "--player_port", "8080", "--base_path", "/flamai-pixelstreaminginfrastructure", "--streamer_base_path", "/flamai-pixelstreamingsvc"]

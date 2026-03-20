@@ -22,6 +22,12 @@ export interface IServerConfig {
     // An https server to use for player connections rather than a port. Not needed if playerPort or httpServer supplied.
     httpsServer?: https.Server;
 
+    // An http server to use for streamer connections with base path support.
+    streamerHttpServer?: http.Server;
+
+    // Base path for streamer connections.
+    streamerBasePath?: string;
+
     // The port to listen on for streamer connections.
     streamerPort: number;
 
@@ -86,13 +92,26 @@ export class SignallingServer {
         }
 
         // Streamer connections
-        const streamerServer = new wslib.WebSocketServer({
-            port: config.streamerPort,
-            backlog: 1,
-            ...config.streamerWsOptions
-        });
-        streamerServer.on('connection', this.onStreamerConnected.bind(this));
-        Logger.info(`Listening for streamer connections on port ${config.streamerPort}`);
+        if (config.streamerHttpServer && config.streamerBasePath) {
+            // Use HTTP server with base path
+            const streamerServer = new wslib.WebSocketServer({
+                server: config.streamerHttpServer,
+                path: config.streamerBasePath,
+                backlog: 1,
+                ...config.streamerWsOptions
+            });
+            streamerServer.on('connection', this.onStreamerConnected.bind(this));
+            Logger.info(`Listening for streamer connections on base path ${config.streamerBasePath}`);
+        } else {
+            // Fallback to standalone port (backward compatibility)
+            const streamerServer = new wslib.WebSocketServer({
+                port: config.streamerPort,
+                backlog: 1,
+                ...config.streamerWsOptions
+            });
+            streamerServer.on('connection', this.onStreamerConnected.bind(this));
+            Logger.info(`Listening for streamer connections on port ${config.streamerPort}`);
+        }
 
         // Player connections
         const server = config.httpsServer || config.httpServer;
