@@ -260,7 +260,8 @@ if (options.serve) {
     const webserverOptions: IWebServerConfig = {
         httpPort: options.player_port,
         root: options.http_root,
-        homepageFile: options.homepage
+        homepageFile: options.homepage,
+        basePath: options.base_path
     };
     if (options.https) {
         webserverOptions.httpsPort = options.https_port;

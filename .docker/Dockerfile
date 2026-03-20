@@ -11,8 +11,8 @@ COPY Signalling ./Signalling
 COPY SignallingWebServer ./SignallingWebServer
 COPY Frontend ./Frontend
 
-# Install coturn during build (required for TURN server)
-RUN apt-get update && apt-get install -y coturn && rm -rf /var/lib/apt/lists/*
+# Install coturn and curl during build
+RUN apt-get update && apt-get install -y coturn curl && rm -rf /var/lib/apt/lists/*
 
 # Build the signalling server and frontend
 RUN SignallingWebServer/platform_scripts/bash/setup.sh --build
@@ -30,5 +30,9 @@ EXPOSE 19302
 EXPOSE 3478
 EXPOSE 3479
 
+# Create health check script
+RUN printf '#!/bin/sh\ncurl -sf http://localhost:8080/ > /dev/null || exit 1\n' > /SignallingWebServer/health-check.sh && chmod +x /SignallingWebServer/health-check.sh
+
 # Use port 8080 since non-root users cannot bind to port 80
-ENTRYPOINT ["bash", "SignallingWebServer/platform_scripts/bash/start.sh", "--nosudo", "--", "--player_port", "8080"]
+WORKDIR /SignallingWebServer
+ENTRYPOINT ["bash", "SignallingWebServer/platform_scripts/bash/start.sh", "--nosudo", "--", "--player_port", "8080", "--base_path", "/flamai-pixelstreaminginfrastructure"]
