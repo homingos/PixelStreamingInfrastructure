@@ -17,7 +17,7 @@
 	"reverse_proxy": true,
 	"reverse_proxy_num_proxies": 1,
 	"base_path": "/flamai-pixelstreaminginfrastructure",
-	"streamer_base_path": "/flamai-pixelstreamingsvc",
+	"streamer_base_path": "/flamai-pixelstreaminginfrastructure/signalling",
 	"peer_options": "",
 	"log_config": true,
 	"stdin": false,
