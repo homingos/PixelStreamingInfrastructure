@@ -39,6 +39,9 @@ export interface IWebServerConfig {
 
     // If true, connections to http will be redirected to https.
     https_redirect?: boolean;
+
+    // Base path for reverse proxy routing (e.g., /flamai-pixelstreaminginfrastructure)
+    basePath?: string;
 }
 
 /**
@@ -111,7 +114,13 @@ export class WebServer {
             }
         }
 
+        const basePath = config.basePath || '';
+
+        // Serve static files at root and base path
         app.use(express.static(config.root));
+        if (basePath) {
+            app.use(basePath, express.static(config.root));
+        }
 
         const limiter = RateLimit({
             windowMs: 60 * 1000, // 1 minute
@@ -121,22 +130,26 @@ export class WebServer {
         // apply rate limiter to all requests
         app.use(limiter);
 
-        // Request has been sent to site root, send the homepage file
-        app.get('/', function (req: any, res: any) {
-            // Try a few paths, see if any resolve to a homepage file the user has set
+        // Homepage handler
+        const serveHomepage = (req: any, res: any) => {
             const p = path.resolve(path.join(config.root, config.homepageFile));
             if (fs.existsSync(p)) {
-                // Send the file for browser to display it
                 res.sendFile(p);
                 return;
             }
-
-            // Catch file doesn't exist, and send back 404 if not
             const error = 'Unable to locate file ' + config.homepageFile;
             Logger.error(error);
             res.status(404).send(error);
-            return;
-        });
+        };
+
+        // Serve homepage at root
+        app.get('/', serveHomepage);
+
+        // Serve homepage at base path if configured
+        if (basePath) {
+            app.get(basePath, serveHomepage);
+            app.get(basePath + '/', serveHomepage);
+        }
 
         /* eslint-enable @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access */
     }
