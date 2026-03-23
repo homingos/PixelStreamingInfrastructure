@@ -1,4 +1,3 @@
-# Use the current Long Term Support (LTS) version of Node.js
 FROM node:lts
 
 WORKDIR /SignallingWebServer
@@ -11,28 +10,57 @@ COPY Signalling ./Signalling
 COPY SignallingWebServer ./SignallingWebServer
 COPY Frontend ./Frontend
 
-# Install coturn and curl during build
-RUN apt-get update && apt-get install -y coturn curl && rm -rf /var/lib/apt/lists/*
+# No more coturn needed — just curl
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Build the signalling server and frontend
 RUN SignallingWebServer/platform_scripts/bash/setup.sh --build
 
-# Create logs directory with write permissions (app runs from /SignallingWebServer/SignallingWebServer/)
 RUN mkdir -p /SignallingWebServer/SignallingWebServer/logs && chmod 777 /SignallingWebServer/SignallingWebServer/logs
 
-# Expose ports
 EXPOSE 8080
-EXPOSE 443
 EXPOSE 8888
 EXPOSE 8888/udp
 EXPOSE 8889
-EXPOSE 19302
-EXPOSE 3478
-EXPOSE 3479
 
-# Create health check script
 RUN printf '#!/bin/sh\ncurl -sf http://localhost:8080/ > /dev/null || exit 1\n' > /SignallingWebServer/health-check.sh && chmod +x /SignallingWebServer/health-check.sh
 
-# Use port 8080 since non-root users cannot bind to port 80
+RUN printf '#!/bin/bash\n\
+set -e\n\
+\n\
+echo "[startup] Fetching Cloudflare TURN credentials..."\n\
+TURN_RESPONSE=$(curl -s -X POST \\\n\
+  "https://rtc.live.cloudflare.com/v1/turn/keys/${CLOUDFARE_TURN_KEY}/credentials/generate-ice-servers" \\\n\
+  -H "Authorization: Bearer ${CLOUDFARE_API_KEY}" \\\n\
+  -H "Content-Type: application/json" \\\n\
+  -d '"'"'{"ttl": 86400}'"'"')\n\
+\n\
+echo "[startup] Writing peer_options.json..."\n\
+echo "${TURN_RESPONSE}" | node -e "\n\
+  const d = JSON.parse(require('"'"'fs'"'"').readFileSync(0, '"'"'utf8'"'"'));\n\
+  require('"'"'fs'"'"').writeFileSync(\n\
+    '"'"'/SignallingWebServer/peer_options.json'"'"',\n\
+    JSON.stringify({ iceServers: d.iceServers }, null, 2)\n\
+  );\n\
+  console.log('"'"'[startup] peer_options.json written'"'"');\n\
+"\n\
+\n\
+echo "[startup] Starting Cirrus on ports 8081 (player) and 8888 (streamer)..."\n\
+bash SignallingWebServer/platform_scripts/bash/start.sh \\\n\
+  --nosudo -- \\\n\
+  --player_port 8081 \\\n\
+  --streamer_port 8888 \\\n\
+  --serve \\\n\
+  --reverse_proxy \\\n\
+  --base_path /flamai-pixelstreaminginfrastructure \\\n\
+  --streamer_base_path /flamai-pixelstreaminginfrastructure/signalling \\\n\
+  --peer_options_file /SignallingWebServer/peer_options.json &\n\
+\n\
+echo "[startup] Waiting for Cirrus to start..."\n\
+sleep 3\n\
+\n\
+echo "[startup] Starting proxy on port 8080..."\n\
+exec node /SignallingWebServer/SignallingWebServer/dist/proxy.js\n\
+' > /SignallingWebServer/startup.sh && chmod +x /SignallingWebServer/startup.sh
+
 WORKDIR /SignallingWebServer
-ENTRYPOINT ["bash", "SignallingWebServer/platform_scripts/bash/start.sh", "--nosudo", "--", "--player_port", "8080", "--streamer_port", "8888", "--serve", "--reverse_proxy", "--base_path", "/flamai-pixelstreaminginfrastructure", "--streamer_base_path", "/flamai-pixelstreaminginfrastructure/signalling"]
+ENTRYPOINT ["/SignallingWebServer/startup.sh"]
