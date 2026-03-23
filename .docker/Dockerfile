@@ -10,7 +10,6 @@ COPY Signalling ./Signalling
 COPY SignallingWebServer ./SignallingWebServer
 COPY Frontend ./Frontend
 
-# No more coturn needed — just curl
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 RUN SignallingWebServer/platform_scripts/bash/setup.sh --build
@@ -36,9 +35,20 @@ TURN_RESPONSE=$(curl -s -X POST \\\n\
 \n\
 echo "[startup] Writing peer_options.json..."\n\
 echo "${TURN_RESPONSE}" | node -e "\n\
-  const d = JSON.parse(require('"'"'fs'"'"').readFileSync(0, '"'"'utf8'"'"'));\n\
+  const raw = require('"'"'fs'"'"').readFileSync(0, '"'"'utf8'"'"');\n\
+  let d;\n\
+  try {\n\
+    d = JSON.parse(raw);\n\
+  } catch(e) {\n\
+    console.error('"'"'[startup] Failed to parse Cloudflare response:'"'"', raw);\n\
+    process.exit(1);\n\
+  }\n\
+  if (!d.iceServers) {\n\
+    console.error('"'"'[startup] No iceServers in response:'"'"', raw);\n\
+    process.exit(1);\n\
+  }\n\
   require('"'"'fs'"'"').writeFileSync(\n\
-    '"'"'/SignallingWebServer/peer_options.json'"'"',\n\
+    '"'"'/tmp/peer_options.json'"'"',\n\
     JSON.stringify({ iceServers: d.iceServers }, null, 2)\n\
   );\n\
   console.log('"'"'[startup] peer_options.json written'"'"');\n\
@@ -53,7 +63,7 @@ bash SignallingWebServer/platform_scripts/bash/start.sh \\\n\
   --reverse_proxy \\\n\
   --base_path /flamai-pixelstreaminginfrastructure \\\n\
   --streamer_base_path /flamai-pixelstreaminginfrastructure/signalling \\\n\
-  --peer_options_file /SignallingWebServer/peer_options.json &\n\
+  --peer_options_file /tmp/peer_options.json &\n\
 \n\
 echo "[startup] Waiting for Cirrus to start..."\n\
 sleep 3\n\
