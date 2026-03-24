@@ -18,20 +18,8 @@
 	"reverse_proxy_num_proxies": 1,
 	"base_path": "/flamai-pixelstreaminginfrastructure",
 	"streamer_base_path": "/flamai-pixelstreaminginfrastructure/signalling",
-	"peer_options": {
-		"iceServers": [
-			{
-				"urls": [
-					"stun:stun.cloudflare.com:3478",
-					"turn:turn.cloudflare.com:3478",
-					"turn:turn.cloudflare.com:3478?transport=tcp",
-					"turns:turn.cloudflare.com:5349"
-				],
-				"username": "PixelStreamingUser",
-				"credential": "AnotherTURNintheroad"
-			}
-		]
-	},
+	"peer_options": {},
+	"ping_interval": 15,
 	"log_config": true,
 	"stdin": false,
 	"console_messages": "verbose"
