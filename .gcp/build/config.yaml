@@ -110,7 +110,9 @@ steps:
       - -c
       - |
         SKIP_BUILD=$(cat /workspace/skip_build.txt | cut -d= -f2)
-        if [ "$$SKIP_BUILD" = "true" ]; then
+        if [ "$_SECRET_UPDATED" = "true" ]; then
+          echo "Secret-only build - skipping docker build"
+        elif [ "$$SKIP_BUILD" = "true" ]; then
           echo "Skipping image build due to skip-build flag"
         elif [ "$$HOTFIX_COMMIT" = "nonprod" ] || [ "$$HOTFIX_COMMIT" = "prod" ]; then
           echo "Skipping img build due to infra hotfix commit"
@@ -124,7 +126,7 @@ steps:
       - -c
       - |
         SKIP_BUILD=$(cat /workspace/skip_build.txt | cut -d= -f2)
-        if [ "$$SKIP_BUILD" = "true" ] || [ "$$HOTFIX_COMMIT" = "prod" ] || [ "$$HOTFIX_COMMIT" = "nonprod" ]; then
+        if [ "$_SECRET_UPDATED" = "true" ] || [ "$$SKIP_BUILD" = "true" ] || [ "$$HOTFIX_COMMIT" = "prod" ] || [ "$$HOTFIX_COMMIT" = "nonprod" ]; then
           echo "Skipping image push step"
           exit 0
         fi
